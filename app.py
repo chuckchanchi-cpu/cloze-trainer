@@ -20,6 +20,7 @@ import os
 import json
 import re
 import random
+import unicodedata
 import requests
 import streamlit as st
 
@@ -86,6 +87,41 @@ def parse_ai_json(content):
             return _unwrap(json.loads(m.group(0)))
         except json.JSONDecodeError:
             return None
+
+def _norm(s):
+    """正規化文字：全形→半形、刪走空白同引號，用嚟做寬鬆比對"""
+    s = unicodedata.normalize("NFKC", s or "")
+    return re.sub(r"[\s「」『』\"'“”’（）()]+", "", s)
+
+def _match_answer(ans, opts):
+    """AI 嘅 answer 可能加咗 A/B/C/D 前綴、淨係寫字母，或者寫多咗字 — 寬鬆比對返正確選項"""
+    if not ans:
+        return None
+    if ans in opts:
+        return ans
+    na = _norm(ans)
+    if not na:
+        return None
+    for o in opts:
+        if _norm(o) == na:
+            return o
+    m = re.fullmatch(r"[a-dA-D]", na)
+    if m:
+        idx = ord(m.group(0).upper()) - ord("A")
+        if idx < len(opts):
+            return opts[idx]
+    m = re.match(r"^[a-dA-D][.、)）:：]\s*(.+)$", ans.strip())
+    if m:
+        cand = m.group(1).strip()
+        for o in opts:
+            if _norm(cand) == _norm(o):
+                return o
+        if cand in opts:
+            return cand
+    for o in opts:
+        if _norm(o) and _norm(o) in na:
+            return o
+    return None
 
 QUESTION_BANK = {
     'nb': {
@@ -315,7 +351,7 @@ def ai_generate(count, topics):
 **題目要求：**
 1. 每題一條完整句子，正式書面語、繁體中文（學校測驗卷風格），內容符合課文情境
 2. 每題得一個空格，用「＿＿＿＿＿＿」表示
-3. 4 個選項：1 個正確答案 + 3 個干擾詞，全部必須嚟自詞語銀行
+3. 4 個選項：1 個正確答案 + 3 個干擾詞，全部必須嚟自詞語銀行；「answer」欄必須同「options」入面正確嗰個選項**字面完全一樣**（原字照寫詞語銀行嘅詞，唔准加 A/B/C/D 前綴、唔准加括號或任何備註）
 4. 干擾詞要「似層層」：近義／同詞性／喺課文同一情境出現過，唔好一眼就睇出錯
 5. 唔可以自創詞語或改寫詞語（例如唔可以將「汗流浹背」寫成「汗流夾背」）
 6. 每題附 hint：用詞語銀行嘅解釋，書面語講解點解揀呢個詞
@@ -327,7 +363,7 @@ def ai_generate(count, topics):
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"請根據詞語銀行生成 {count} 條填充選擇題（每題一個空格、4 個選項、附 hint）。"},
+            {"role": "user", "content": f"請根據詞語銀行生成 {count} 條填充選擇題（每題一個空格、4 個選項、附 hint；answer 必須原字照寫 options 入面正確嗰個詞語，唔准加 A/B/C/D 前綴）。"},
         ],
         "max_tokens": 6000,
         "temperature": 0.8,
@@ -356,9 +392,10 @@ def ai_generate(count, topics):
         if not q or not isinstance(opts, list) or len(opts) != 4:
             continue
         clean_opts = [o.strip() for o in opts]
-        if ans not in clean_opts or ans not in word_set:
+        matched = _match_answer(ans, clean_opts)
+        if matched is None or matched not in word_set:
             continue
-        valid.append({"q": q, "options": clean_opts, "answer": ans, "hint": hint})
+        valid.append({"q": q, "options": clean_opts, "answer": matched, "hint": hint})
     if not valid:
         st.error("❌ AI 生成嘅題目全部唔合格（答案唔喺詞語銀行）— 再試一次？")
     return valid[:count]
