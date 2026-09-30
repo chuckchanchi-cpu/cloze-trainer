@@ -58,7 +58,8 @@ def parse_ai_json(content):
     content = content.replace("\\\\", "\\")
     content = re.sub(r"\\frac\{([^}]*)\}\{([^}]*)\}", r"(\1)/(\2)", content)
     for tok, rep in [("\\div", "÷"), ("\\times", "×"), ("\\cdot", "·"), ("\\pm", "±"),
-                     ("\\le", "≤"), ("\\ge", "≥"), ("\\neq", "≠"), ("\\%", "%"),
+                     ("\\le", "≤"), ("\\ge", "≥"), ("\
+eq", "≠"), ("\\%", "%"),
                      ("\\times", "×")]:
         content = content.replace(tok, rep)
     # 清除剩餘嘅 LaTeX 指令（\approx \text \left \right \mathrm...）→ 防止非法 JSON escape
@@ -118,9 +119,11 @@ def _match_answer(ans, opts):
                 return o
         if cand in opts:
             return cand
-    for o in opts:
-        if _norm(o) and _norm(o) in na:
-            return o
+    parts = [p.strip() for p in re.split(r"[和及或、，]", ans) if p.strip()]
+    if len(parts) >= 2:
+        nopts = {_norm(o): o for o in opts}
+        if all(_norm(p) in nopts for p in parts):
+            return None  # 一題多答案 → 唔合格
     return None
 
 QUESTION_BANK = {
@@ -356,6 +359,9 @@ def ai_generate(count, topics):
 5. 唔可以自創詞語或改寫詞語（例如唔可以將「汗流浹背」寫成「汗流夾背」）
 6. 每題附 hint：用詞語銀行嘅解釋，書面語講解點解揀呢個詞
 
+7. **單一答案鐵律**：每題必須只有一個正確答案。如果空位／問題可以有兩個或以上合理答案，你一定要改題目（加語境限制）令答案唯一。嚴禁出「哪兩個／哪些／多選」等多答案題目。
+8. **出題後自我檢查**：答案係咪原字喺 options 入面？其餘三個選項係咪明顯錯？如果唔係，即刻改題目／選項。
+
 **輸出格式（只輸出 JSON array，唔好有其他文字）：**
 [{{"question": "...", "options": ["...", "...", "...", "..."], "answer": "...", "hint": "..."}}]"""
 
@@ -389,6 +395,8 @@ def ai_generate(count, topics):
         opts = item.get("options") or []
         ans = (item.get("answer") or "").strip()
         hint = (item.get("hint") or "").strip()
+        if re.search(r"哪兩個|邊兩個|哪幾|哪些|多選|兩項|兩個答案|邊幾|which two|select all|all that apply", q):
+            continue
         if not q or not isinstance(opts, list) or len(opts) != 4:
             continue
         clean_opts = [o.strip() for o in opts]
