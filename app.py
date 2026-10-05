@@ -359,7 +359,8 @@ def ai_generate(count, topics):
     for t in topics:
         info = AI_TOPICS[t]
         ctx_lines.append(f"【{info['name']}】{info['context']}")
-        for w, d in info["words"]:
+        word_list = info.get('words', info.get('questions', []))
+        for w, d in word_list:
             bank_lines.append(f"- {w}：{d}")
             word_set.add(w)
     system_prompt = f"""你係一位經驗豐富嘅小學六年級中文科老師，專責出「詞語填充」練習題。
@@ -471,8 +472,10 @@ with st.sidebar:
         with st.expander("📚 詞語銀行"):
             if mode_is_ai:
                 for t in topics:
-                    st.markdown(f"**{AI_TOPICS[t]['name']}**（{len(AI_TOPICS[t]['words'])} 詞）")
-                    st.write("、".join(w for w, _ in AI_TOPICS[t]["words"]))
+                    topic = AI_TOPICS[t]
+                    word_list = topic.get('words', topic.get('questions', []))
+                    st.markdown(f"**{topic['name']}**（{len(word_list)} 詞）")
+                    st.write("、".join(w for w, _ in word_list))
             else:
                 for t in topics:
                     st.markdown(f"**{QUESTION_BANK[t]['name']}**（{len(QUESTION_BANK[t]['questions'])} 題）")
