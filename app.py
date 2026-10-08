@@ -376,7 +376,7 @@ def label_for(k, mode_is_ai):
     else:
         data = QUESTION_BANK[k]
         date = data.get('date', '')
-        return f"{data['name']} ({date})" if date else data['name"]
+        return f"{data['name']} ({date})" if date else data['name']
 
 def ai_generate(count, topics):
     api_base, api_key, model = get_api_config()
