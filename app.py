@@ -535,7 +535,7 @@ def ai_generate(count, topics):
         st.error("❌ AI 生成嘅題目全部唔合格（答案唔喺詞語銀行）— 再試一次？")
     return valid[:count]
 
-def build_round(mode_is_ai, topics, count):
+def build_round(mode_is_ai, topics, count, fill_ratio=25):
     """生成一輪題目；成功回 True，失敗（例如 AI 出錯）回 False — 失敗時唔 rerun，等錯誤訊息留喺畫面"""
     if mode_is_ai:
         with st.spinner("✨ AI 生成緊句子，請稍候…（約 10–30 秒）"):
@@ -550,6 +550,11 @@ def build_round(mode_is_ai, topics, count):
             qs.append({"q": q, "options": opts, "answer": ans, "hint": hint})
     if not qs:
         return False
+    # 默寫題：隨機抽 fill_ratio% 做「自己打字填詞」（背誦默寫，唔畀選項），其餘係 4 選 1 選擇題
+    n_fill = max(0, min(len(qs), round(len(qs) * fill_ratio / 100)))
+    fill_idx = set(random.sample(range(len(qs)), n_fill)) if n_fill else set()
+    for i, item in enumerate(qs):
+        item["type"] = "fill" if i in fill_idx else "mcq"
     st.session_state.fill_questions = qs
     st.session_state.fill_checked = False
     return True
@@ -566,12 +571,14 @@ with st.sidebar:
         key="fill_topics",
     )
     count = st.slider("每輪題數", 5, 20, 10, key="fill_count")
+    fill_ratio = st.slider("✍️ 默寫題比例（%）", 0, 100, 25, 5, key="fill_ratio",
+                           help="默寫題 = 自己打字填詞（背誦默寫，唔畀選項）；其餘係 4 選 1 選擇題。0% = 全部選擇題")
     if st.button("🎲 生成題目", type="primary", use_container_width=True):
         if not topics:
             st.warning("⚠️ 請先揀至少一個主題")
         else:
             try:
-                if build_round(mode_is_ai, topics, count):
+                if build_round(mode_is_ai, topics, count, fill_ratio):
                     st.rerun()
             except Exception as e:
                 st.error(f"❌ 出錯：{e}")
@@ -597,9 +604,14 @@ if not st.session_state.fill_questions:
     st.stop()
 
 qs = st.session_state.fill_questions
-st.subheader(f"📝 今輪 {len(qs)} 題")
+n_fill = sum(1 for it in qs if it.get("type") == "fill")
+st.subheader(f"📝 今輪 {len(qs)} 題" + (f"（含 {n_fill} 題默寫 ✍️）" if n_fill else ""))
 for i, item in enumerate(qs):
-    st.radio(f"**{i + 1}.** {item['q']}", item["options"], key=f"fill_a{i}", index=None)
+    if item.get("type") == "fill":
+        st.markdown(f"**{i + 1}.** ✍️ {item['q']}")
+        st.text_input("答案", key=f"fill_a{i}", label_visibility="collapsed", placeholder="默寫詞語…")
+    else:
+        st.radio(f"**{i + 1}.** {item['q']}", item["options"], key=f"fill_a{i}", index=None)
 
 c1, c2, c3 = st.columns([1, 1, 3])
 if not st.session_state.fill_checked:
@@ -610,15 +622,21 @@ else:
     results = []
     for i, item in enumerate(qs):
         user = st.session_state.get(f"fill_a{i}")
-        results.append((i, user, user == item["answer"]))
+        if item.get("type") == "fill":
+            ok = user is not None and _norm(user) == _norm(item["answer"])
+        else:
+            ok = user == item["answer"]
+        results.append((i, user, ok))
     correct = sum(1 for _, _, ok in results if ok)
     st.metric("🏆 得分", f"{correct} / {len(qs)}")
     for i, user, ok in results:
         item = qs[i]
+        is_fill = item.get("type") == "fill"
+        verb = "填" if is_fill else "揀"
         if ok:
-            st.success(f"**✅ 第 {i + 1} 題**（你揀咗「{user}」）")
+            st.success(f"**✅ 第 {i + 1} 題**（你{verb}咗「{user}」）")
         else:
-            st.error(f"**❌ 第 {i + 1} 題**　你揀咗：「{user or '（未作答）'}」　正確答案：**{item['answer']}**")
+            st.error(f"**❌ 第 {i + 1} 題**　你{verb}咗：「{user or '（未作答）'}」　正確答案：**{item['answer']}**")
         st.caption("💡 " + item["hint"])
     st.markdown("---")
 
@@ -626,9 +644,10 @@ if c2.button("🔄 再嚟一輪", use_container_width=True):
     mode_is_ai = st.session_state.fill_mode == "✨ AI 生成新句（qwen3.8-flash）"
     topics = st.session_state.fill_topics
     count = st.session_state.fill_count
+    fill_ratio = st.session_state.get("fill_ratio", 25)
     if topics:
         try:
-            if build_round(mode_is_ai, topics, count):
+            if build_round(mode_is_ai, topics, count, fill_ratio):
                 st.rerun()
         except Exception as e:
             st.error(f"❌ 出錯：{e}")
