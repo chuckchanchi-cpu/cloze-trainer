@@ -555,6 +555,10 @@ def build_round(mode_is_ai, topics, count, fill_ratio=25):
     fill_idx = set(random.sample(range(len(qs)), n_fill)) if n_fill else set()
     for i, item in enumerate(qs):
         item["type"] = "fill" if i in fill_idx else "mcq"
+    # 清走上一輪作答狀態（fill_a*）：避免殘留答案影響批改，亦避免舊文字答案撞崩新一輪嘅選項 widget
+    for k in list(st.session_state.keys()):
+        if re.fullmatch(r"fill_a\d+", str(k)):
+            del st.session_state[k]
     st.session_state.fill_questions = qs
     st.session_state.fill_checked = False
     return True
@@ -623,7 +627,8 @@ else:
     for i, item in enumerate(qs):
         user = st.session_state.get(f"fill_a{i}")
         if item.get("type") == "fill":
-            ok = user is not None and _norm(user) == _norm(item["answer"])
+            # 默寫批改：容忍大小寫、多餘空格（_norm 已處理全半形／空白）
+            ok = user is not None and _norm(user).casefold() == _norm(item["answer"]).casefold()
         else:
             ok = user == item["answer"]
         results.append((i, user, ok))

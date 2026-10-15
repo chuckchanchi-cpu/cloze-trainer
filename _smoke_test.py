@@ -28,4 +28,25 @@ for qk in qb:
     gaps = answers - words
     flag = "✅" if not gaps else "⚠️"
     print(f"{flag} {qk} → AI[{aik}]: 答案覆蓋 {len(answers & words)}/{len(answers)}" + (f"（詞語銀行未含 {gaps}，屬正常）" if gaps else ""))
+# ===== 默寫（fill）批改容忍度：大小寫／多餘空格／全半形 =====
+def _norm(s):
+    import unicodedata, re
+    s = unicodedata.normalize("NFKC", s or "")
+    return re.sub(r"[\s「」『』\"'“”’（）()]+", "", s)
+
+def grade_fill(user, ans):
+    return user is not None and _norm(user).casefold() == _norm(ans).casefold()
+
+fill_cases = [
+    ("慕名", "慕名", True),
+    (" 慕 名 ", "慕名", True),   # 多餘空格
+    ("Abc", "abc", True),       # 大小寫
+    ("錯過", "慕名", False),
+    (None, "慕名", False),
+]
+for user, ans, expect in fill_cases:
+    got = grade_fill(user, ans)
+    flag = "✅" if got == expect else "❌"
+    print(f"{flag} grade_fill({user!r}, {ans!r}) = {got} (expect {expect})")
+
 print("done")
