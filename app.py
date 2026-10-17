@@ -605,8 +605,10 @@ def build_round(mode_is_ai, topics, count, fill_ratio=25):
         item["type"] = "fill" if i in fill_idx else "mcq"
     # 清走上一輪作答狀態（fill_a*）：避免殘留答案影響批改，亦避免舊文字答案撞崩新一輪嘅選項 widget
     for k in list(st.session_state.keys()):
-        if re.fullmatch(r"fill_a\d+", str(k)):
+        if re.fullmatch(r"fill_a[\d_]+", str(k)):
             del st.session_state[k]
+    # 每輪獨立 round id：widget key 含 round，舊答案物理上唔可能殘留到新一輪
+    st.session_state.fill_round = st.session_state.get("fill_round", 0) + 1
     st.session_state.fill_questions = qs
     st.session_state.fill_checked = False
     return True
@@ -656,14 +658,15 @@ if not st.session_state.fill_questions:
     st.stop()
 
 qs = st.session_state.fill_questions
+_rd = st.session_state.get("fill_round", 0)
 n_fill = sum(1 for it in qs if it.get("type") == "fill")
 st.subheader(f"📝 今輪 {len(qs)} 題" + (f"（含 {n_fill} 題默寫 ✍️）" if n_fill else ""))
 for i, item in enumerate(qs):
     if item.get("type") == "fill":
         st.markdown(f"**{i + 1}.** ✍️ {item['q']}")
-        st.text_input("答案", key=f"fill_a{i}", label_visibility="collapsed", placeholder="默寫詞語…")
+        st.text_input("答案", key=f"fill_a{_rd}_{i}", label_visibility="collapsed", placeholder="默寫詞語…")
     else:
-        st.radio(f"**{i + 1}.** {item['q']}", item["options"], key=f"fill_a{i}", index=None)
+        st.radio(f"**{i + 1}.** {item['q']}", item["options"], key=f"fill_a{_rd}_{i}", index=None)
 
 c1, c2, c3 = st.columns([1, 1, 3])
 if not st.session_state.fill_checked:
@@ -673,7 +676,7 @@ if not st.session_state.fill_checked:
 else:
     results = []
     for i, item in enumerate(qs):
-        user = st.session_state.get(f"fill_a{i}")
+        user = st.session_state.get(f"fill_a{_rd}_{i}")
         if item.get("type") == "fill":
             # 默寫批改：容忍大小寫、多餘空格（_norm 已處理全半形／空白）
             ok = user is not None and _norm(user).casefold() == _norm(item["answer"]).casefold()
