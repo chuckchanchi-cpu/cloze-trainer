@@ -581,7 +581,7 @@ def ai_generate(count, topics):
             {"role": "user", "content": f"請根據詞語銀行生成 {count} 條填充選擇題（每題一個空格、4 個選項、附 hint；answer 必須原字照寫 options 入面正確嗰個詞語，唔准加 A/B/C/D 前綴）。"},
         ],
         "max_tokens": 6000,
-        "temperature": 0.8,
+        "temperature": 0.5,
         "enable_thinking": False,
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -611,6 +611,12 @@ def ai_generate(count, topics):
         clean_opts = [o.strip() for o in opts]
         matched = _match_answer(ans, clean_opts)
         if matched is None or matched not in word_set:
+            continue
+        # 題目必須有挖空（＿＿），否則唔係填充題
+        if "＿＿" not in q:
+            continue
+        # 答案詞唔准直接出現喺題目文字入面（必須已挖空成空格）
+        if len(matched) >= 2 and _norm(matched) and _norm(matched) in _norm(q):
             continue
         valid.append({"q": q, "options": clean_opts, "answer": matched, "hint": hint})
     if not valid:
