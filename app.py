@@ -574,51 +574,70 @@ def ai_generate(count, topics):
 **輸出格式（只輸出 JSON array，唔好有其他文字）：**
 [{{"question": "...", "options": ["...", "...", "...", "..."], "answer": "...", "hint": "..."}}]"""
 
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"請根據詞語銀行生成 {count} 條填充選擇題（每題一個空格、4 個選項、附 hint；answer 必須原字照寫 options 入面正確嗰個詞語，唔准加 A/B/C/D 前綴）。"},
-        ],
-        "max_tokens": 6000,
-        "temperature": 0.5,
-        "enable_thinking": False,
-    }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    try:
-        r = requests.post(f"{api_base}/chat/completions", json=payload, headers=headers, timeout=180)
-    except requests.exceptions.RequestException as e:
-        st.error(f"❌ 連唔到 API：{e}")
-        return []
-    if r.status_code != 200:
-        st.error(f"❌ AI 生成失敗（錯誤碼 {r.status_code}）：{r.text[:200]}")
-        return []
-    content = r.json()["choices"][0]["message"]["content"]
-    data = parse_ai_json(content)
-    if not isinstance(data, list):
-        st.error("❌ AI 回覆格式唔啱，再試一次？")
-        return []
+    def _call_batch(n):
+        """發一次請求生成 n 條；成功回 list（可能少過 n），請求失敗／格式錯回 None"""
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"請根據詞語銀行生成 {n} 條填充選擇題（每題一個空格、4 個選項、附 hint；answer 必須原字照寫 options 入面正確嗰個詞語，唔准加 A/B/C/D 前綴）。"},
+            ],
+            "max_tokens": 3000,
+            "temperature": 0.5,
+            "enable_thinking": False,
+        }
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        try:
+            r = requests.post(f"{api_base}/chat/completions", json=payload, headers=headers, timeout=120)
+        except requests.exceptions.RequestException:
+            return None
+        if r.status_code != 200:
+            return None
+        content = r.json()["choices"][0]["message"]["content"]
+        data = parse_ai_json(content)
+        if not isinstance(data, list):
+            return None
+        out = []
+        for item in data:
+            q = (item.get("question") or "").strip()
+            opts = item.get("options") or []
+            ans = (item.get("answer") or "").strip()
+            hint = (item.get("hint") or "").strip()
+            if re.search(r"哪兩個|邊兩個|哪幾|哪些|多選|兩項|兩個答案|邊幾|which two|select all|all that apply", q):
+                continue
+            if not q or not isinstance(opts, list) or len(opts) != 4:
+                continue
+            clean_opts = [o.strip() for o in opts]
+            matched = _match_answer(ans, clean_opts)
+            if matched is None or matched not in word_set:
+                continue
+            # 題目必須有挖空（＿＿），否則唔係填充題
+            if "＿＿" not in q:
+                continue
+            # 答案詞唔准直接出現喺題目文字入面（必須已挖空成空格）
+            if len(matched) >= 2 and _norm(matched) and _norm(matched) in _norm(q):
+                continue
+            out.append({"q": q, "options": clean_opts, "answer": matched, "hint": hint})
+        return out
+
+    # 拆批生成：每批 5 條，避免單一請求太大／諗太耐被 Cloudflare 斷線（錯誤碼 522）
+    BATCH = 5
     valid = []
-    for item in data:
-        q = (item.get("question") or "").strip()
-        opts = item.get("options") or []
-        ans = (item.get("answer") or "").strip()
-        hint = (item.get("hint") or "").strip()
-        if re.search(r"哪兩個|邊兩個|哪幾|哪些|多選|兩項|兩個答案|邊幾|which two|select all|all that apply", q):
+    fail_streak = 0
+    max_iters = count // BATCH + 4
+    while len(valid) < count and max_iters > 0:
+        max_iters -= 1
+        n = min(BATCH, count - len(valid))
+        if n <= 0:
+            break
+        batch = _call_batch(n)
+        if batch is None:
+            fail_streak += 1
+            if fail_streak >= 3:
+                break
             continue
-        if not q or not isinstance(opts, list) or len(opts) != 4:
-            continue
-        clean_opts = [o.strip() for o in opts]
-        matched = _match_answer(ans, clean_opts)
-        if matched is None or matched not in word_set:
-            continue
-        # 題目必須有挖空（＿＿），否則唔係填充題
-        if "＿＿" not in q:
-            continue
-        # 答案詞唔准直接出現喺題目文字入面（必須已挖空成空格）
-        if len(matched) >= 2 and _norm(matched) and _norm(matched) in _norm(q):
-            continue
-        valid.append({"q": q, "options": clean_opts, "answer": matched, "hint": hint})
+        valid += batch
+        fail_streak = 0
     if not valid:
         st.error("❌ AI 生成嘅題目全部唔合格（答案唔喺詞語銀行）— 再試一次？")
     return valid[:count]
