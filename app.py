@@ -620,11 +620,13 @@ def ai_generate(count, topics):
             out.append({"q": q, "options": clean_opts, "answer": matched, "hint": hint})
         return out
 
-    # 拆批生成：每批 5 條，避免單一請求太大／諗太耐被 Cloudflare 斷線（錯誤碼 522）
-    BATCH = 5
+    # 拆批生成：每批 3 條，避免單一請求太大／諗太耐被 Cloudflare 斷線（錯誤碼 522）
+    # 失敗自動重試（最多連續 4 次），批與批之間停 1 秒避免迫爆
+    import time as _t
+    BATCH = 3
     valid = []
     fail_streak = 0
-    max_iters = count // BATCH + 4
+    max_iters = count // BATCH + 8
     while len(valid) < count and max_iters > 0:
         max_iters -= 1
         n = min(BATCH, count - len(valid))
@@ -633,13 +635,14 @@ def ai_generate(count, topics):
         batch = _call_batch(n)
         if batch is None:
             fail_streak += 1
-            if fail_streak >= 3:
+            if fail_streak >= 4:
                 break
+            _t.sleep(1)
             continue
         valid += batch
         fail_streak = 0
     if not valid:
-        st.error("❌ AI 生成嘅題目全部唔合格（答案唔喺詞語銀行）— 再試一次？")
+        st.warning("⚠️ AI 暫時生成唔到（可能 API 繁忙／超時）— 將自動改用教材原題。")
     return valid[:count]
 
 def build_round(mode_is_ai, topics, count, fill_ratio=25):
@@ -647,6 +650,17 @@ def build_round(mode_is_ai, topics, count, fill_ratio=25):
     if mode_is_ai:
         with st.spinner("✨ AI 生成緊句子，請稍候…（約 10–30 秒）"):
             qs = ai_generate(count, topics)
+        if not qs:
+            # AI 失敗（522／全部唔合格）→ 自動改用教材原題，保證有題出
+            pool = [q for t in topics for q in QUESTION_BANK[t]["questions"]]
+            random.shuffle(pool)
+            qs = []
+            for q, choices, ans, hint in pool[:count]:
+                opts = list(choices)
+                random.shuffle(opts)
+                qs.append({"q": q, "options": opts, "answer": ans, "hint": hint})
+            if qs:
+                st.info("📖 AI 生成失敗，已改用教材原題（100% 教材內容，可照常練習）。")
     else:
         pool = [q for t in topics for q in QUESTION_BANK[t]["questions"]]
         random.shuffle(pool)
