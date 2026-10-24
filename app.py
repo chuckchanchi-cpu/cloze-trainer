@@ -621,12 +621,12 @@ def ai_generate(count, topics):
         return out
 
     # 拆批生成：每批 3 條，避免單一請求太大／諗太耐被 Cloudflare 斷線（錯誤碼 522）
-    # 失敗自動重試（最多連續 4 次），批與批之間停 1 秒避免迫爆
+    # 失敗自動重試（最多連續 4 次），批與批之間停 1 秒避免迫爆；連續失敗自動縮細批次（3→2→1）
     import time as _t
     BATCH = 3
     valid = []
     fail_streak = 0
-    max_iters = count // BATCH + 8
+    max_iters = count + 10
     while len(valid) < count and max_iters > 0:
         max_iters -= 1
         n = min(BATCH, count - len(valid))
@@ -635,14 +635,35 @@ def ai_generate(count, topics):
         batch = _call_batch(n)
         if batch is None:
             fail_streak += 1
+            if fail_streak >= 2 and BATCH > 1:
+                BATCH -= 1  # 連續失敗 → 縮細批次再試
+                _t.sleep(1)
+                continue
             if fail_streak >= 4:
                 break
             _t.sleep(1)
             continue
         valid += batch
         fail_streak = 0
+    # AI 唔夠數：用教材原題補足（成語單元一等都有教材題，保證齊 count 條）
+    if len(valid) < count:
+        used = {it["answer"] for it in valid}
+        bank = []
+        for t in topics:
+            info = QUESTION_BANK.get(t)
+            if not info:
+                continue
+            for q, choices, ans, hint in info["questions"]:
+                if ans in used:
+                    continue
+                opts = list(choices)
+                random.shuffle(opts)
+                bank.append({"q": q, "options": opts, "answer": ans, "hint": hint})
+        random.shuffle(bank)
+        if bank:
+            valid += bank[:count - len(valid)]
     if not valid:
-        st.warning("⚠️ AI 暫時生成唔到（可能 API 繁忙／超時）— 將自動改用教材原題。")
+        st.warning("⚠️ AI 暫時生成唔到（可能 API 繁忙／超時），已改用教材原題。")
     return valid[:count]
 
 def build_round(mode_is_ai, topics, count, fill_ratio=25):
