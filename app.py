@@ -570,6 +570,7 @@ def ai_generate(count, topics):
 
 7. **單一答案鐵律**：每題必須只有一個正確答案。如果空位／問題可以有兩個或以上合理答案，你一定要改題目（加語境限制）令答案唯一。嚴禁出「哪兩個／哪些／多選」等多答案題目。
 8. **出題後自我檢查**：答案係咪原字喺 options 入面？其餘三個選項係咪明顯錯？如果唔係，即刻改題目／選項。
+9. **詞語多樣性鐵律**：成組題目嘅「正確答案」盡量唔好重複用同一個詞。優先揀未用過嘅詞語出題，令一輪題目覆蓋越多唔同詞語越好。只有詞語銀行唔夠詞先准重用。
 
 **輸出格式（只輸出 JSON array，唔好有其他文字）：**
 [{{"question": "...", "options": ["...", "...", "...", "..."], "answer": "...", "hint": "..."}}]"""
@@ -626,7 +627,11 @@ def ai_generate(count, topics):
     BATCH = 3
     valid = []
     fail_streak = 0
-    max_iters = count + 10
+    max_iters = count + 12
+    # 詞語多樣性控制：每詞最多做答案嘅次數（詞語少嘅 topic 自動放寬，例如 20 題/14 詞 → 每詞最多 2 次）
+    n_words = len(word_set)
+    max_repeat = max(1, -(-count // n_words)) if n_words else 1
+    used_counts = {}
     while len(valid) < count and max_iters > 0:
         max_iters -= 1
         n = min(BATCH, count - len(valid))
@@ -643,7 +648,14 @@ def ai_generate(count, topics):
                 break
             _t.sleep(1)
             continue
-        valid += batch
+        # 過濾重複答案詞：同一詞語出現超過上限嘅題目唔收，等下一批出其他詞
+        fresh = [it for it in batch if used_counts.get(it["answer"], 0) < max_repeat]
+        if not fresh:
+            # 呢批全部撞晒已滿額詞語 → 唔計失敗，直接叫下一批（AI 會換詞）
+            continue
+        for it in fresh:
+            used_counts[it["answer"]] = used_counts.get(it["answer"], 0) + 1
+        valid += fresh
         fail_streak = 0
     # AI 唔夠數：用教材原題補足（成語單元一等都有教材題，保證齊 count 條）
     if len(valid) < count:
