@@ -697,6 +697,16 @@ def build_round(mode_is_ai, topics, count, fill_ratio=25):
     else:
         pool = [q for t in topics for q in QUESTION_BANK[t]["questions"]]
         random.shuffle(pool)
+        # 唔好重複詞語：優先選唔同答案嘅題目，唔夠先用重複（擴大詞彙訓練面）
+        seen, uniq, dup = set(), [], []
+        for item in pool:
+            key = str(item[2]).strip()
+            if key in seen:
+                dup.append(item)
+            else:
+                seen.add(key)
+                uniq.append(item)
+        pool = uniq + dup
         qs = []
         for q, choices, ans, hint in pool[:count]:
             opts = list(choices)
