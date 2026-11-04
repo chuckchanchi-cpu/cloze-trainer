@@ -27,9 +27,12 @@ import streamlit as st
 st.set_page_config(page_title="🔤 填充練習生成器", page_icon="🔤", layout="wide")
 
 # 將 Streamlit Secrets 注入環境變數（每個 page 獨立執行，要自己注入！）
-if hasattr(st, "secrets") and len(st.secrets) > 0:
+# ⚠️ 安全讀 Secrets：冇設定 Secrets 唔好炸 app（len(st.secrets) 喺新版 Streamlit 會拋異常）
+try:
     for k, v in st.secrets.items():
         os.environ[k] = str(v)
+except Exception:
+    pass
 
 # ===== API 配置（env-first，兼容 OPENAI_* / SILRA_* 舊設定名）=====
 def get_api_config():
