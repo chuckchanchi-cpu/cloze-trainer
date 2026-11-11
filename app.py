@@ -833,7 +833,18 @@ def ai_generate(count, topics):
         st.warning("⚠️ AI 暫時生成唔到（可能 API 繁忙／超時），已改用教材原題。")
     return valid[:count]
 
-def build_round(mode_is_ai, topics, count, fill_ratio=25):
+
+# ===== ⭐ 重點詞語（官方考試範圍，2026-11-11 chuck 確認）=====
+KEY_LESSONS = {
+    '第1課': '瀰漫 扭曲 置身 威脅 研製 醉心 依賴 汗流浹背 屢次 百折不撓',
+    '第3課': '資產 募款 鰥寡孤獨 創建 義務 敬慕 愛戴 掙錢 尊嚴 服侍',
+    '第4課': '募捐 窘態 犧牲 彬彬有禮 眾目睽睽 狼狽 鞠躬 救濟 踴躍 微不足道',
+    '第5課': '黝黑 水窖 零工 破爛 簡陋 沾滿 大拇指 賺 誇獎 熱烈',
+    '第7課': '慕名 不忿 躊躇 捨棄 沉甸甸 規矩 不約而同 錯過 語重心長 恍然大悟',
+}
+KEY_WORDS_FLAT = {w for ws in KEY_LESSONS.values() for w in ws.split()}
+
+def build_round(mode_is_ai, topics, count, fill_ratio=25, key_only=False):
     """生成一輪題目；成功回 True，失敗（例如 AI 出錯）回 False — 失敗時唔 rerun，等錯誤訊息留喺畫面"""
     if mode_is_ai:
         with st.spinner("✨ AI 生成緊句子，請稍候…（約 10–30 秒）"):
@@ -851,6 +862,9 @@ def build_round(mode_is_ai, topics, count, fill_ratio=25):
                 st.info("📖 AI 生成失敗，已改用教材原題（100% 教材內容，可照常練習）。")
     else:
         pool = [q for t in topics for q in QUESTION_BANK[t]["questions"]]
+        if key_only:
+            kp = [q for q in pool if q[2] in KEY_WORDS_FLAT]
+            pool = kp if kp else pool  # ⭐ 只出官方重點詞
         random.shuffle(pool)
         # 唔好重複詞語：優先選唔同答案嘅題目，唔夠先用重複（擴大詞彙訓練面）
         seen, uniq, dup = set(), [], []
@@ -898,12 +912,14 @@ with st.sidebar:
     count = st.slider("每輪題數", 5, 20, 10, key="fill_count")
     fill_ratio = st.slider("✍️ 默寫題比例（%）", 0, 100, 25, 5, key="fill_ratio",
                            help="默寫題 = 自己打字填詞（背誦默寫，唔畀選項）；其餘係 4 選 1 選擇題。0% = 全部選擇題")
+    key_only = st.checkbox("⭐ 重點詞語專注訓練（只出官方重點詞）", key="fill_keyonly",
+                             help="第一/三/四/五/七課官方重點詞語，專注操考試範圍")
     if st.button("🎲 生成題目", type="primary", use_container_width=True):
         if not topics:
             st.warning("⚠️ 請先揀至少一個主題")
         else:
             try:
-                if build_round(mode_is_ai, topics, count, fill_ratio):
+                if build_round(mode_is_ai, topics, count, fill_ratio, key_only=st.session_state.get("fill_keyonly", False)):
                     st.rerun()
             except Exception as e:
                 st.error(f"❌ 出錯：{e}")
@@ -974,7 +990,7 @@ if c2.button("🔄 再嚟一輪", use_container_width=True):
     fill_ratio = st.session_state.get("fill_ratio", 25)
     if topics:
         try:
-            if build_round(mode_is_ai, topics, count, fill_ratio):
+            if build_round(mode_is_ai, topics, count, fill_ratio, key_only=st.session_state.get("fill_keyonly", False)):
                 st.rerun()
         except Exception as e:
             st.error(f"❌ 出錯：{e}")
