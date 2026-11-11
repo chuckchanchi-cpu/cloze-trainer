@@ -730,15 +730,20 @@ def ai_generate(count, topics):
 **輸出格式（只輸出 JSON array，唔好有其他文字）：**
 [{{"question": "...", "options": ["...", "...", "...", "..."], "answer": "...", "hint": "..."}}]"""
 
-    def _call_batch(n):
-        """發一次請求生成 n 條；成功回 list（可能少過 n），請求失敗／格式錯回 None"""
+    def _call_batch(n, avoid=None):
+        """發一次請求生成 n 條；成功回 list（可能少過 n），請求失敗／格式錯回 None
+        avoid = 已經用過嘅詞（會明確叫 AI 唔好用呢啲答案），避免重複出同一個詞而白廢整批"""
+        avoid = avoid or set()
+        user_msg = f"請根據詞語銀行生成 {n} 條填充選擇題（每題一個空格、4 個選項、附 hint；answer 必須原字照寫 options 入面正確嗰個詞語，唔准加 A/B/C/D 前綴）。"
+        if avoid:
+            user_msg += f"\n\n⚠️ 以下詞語已經用過，今次**唔可以**再作為正確答案：{'、'.join(sorted(avoid))}"
         payload = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"請根據詞語銀行生成 {n} 條填充選擇題（每題一個空格、4 個選項、附 hint；answer 必須原字照寫 options 入面正確嗰個詞語，唔准加 A/B/C/D 前綴）。"},
+                {"role": "user", "content": user_msg},
             ],
-            "max_tokens": 3000,
+            "max_tokens": max(2000, min(6000, n * 200)),
             "temperature": 0.5,
             "enable_thinking": False,
         }
@@ -779,34 +784,36 @@ def ai_generate(count, topics):
     # 拆批生成：每批 3 條，避免單一請求太大／諗太耐被 Cloudflare 斷線（錯誤碼 522）
     # 失敗自動重試（最多連續 4 次），批與批之間停 1 秒避免迫爆；連續失敗自動縮細批次（3→2→1）
     import time as _t
-    BATCH = 3
+    # 批次由 3 提升到 8：20 題由 7 次 call 減到 2-3 次（快 2-3 倍）
+    BATCH = max(8, min(count, 10))
     valid = []
     fail_streak = 0
-    max_iters = count + 12
-    # 詞語多樣性控制：每詞最多做答案嘅次數（詞語少嘅 topic 自動放寬，例如 20 題/14 詞 → 每詞最多 2 次）
+    max_iters = 8
+    # 詞語多樣性控制：每詞最多做答案嘅次數
     n_words = len(word_set)
     max_repeat = max(1, -(-count // n_words)) if n_words else 1
     used_counts = {}
     while len(valid) < count and max_iters > 0:
         max_iters -= 1
-        n = min(BATCH, count - len(valid))
+        n = min(BATCH, count - len(valid) + 2)   # 多要 2 條做緩衝（部分可能唔合格）
         if n <= 0:
             break
-        batch = _call_batch(n)
+        # 只叫 AI 避開「已達上限」嘅詞，避免白廢
+        avoid = {w for w, c in used_counts.items() if c >= max_repeat}
+        batch = _call_batch(n, avoid)
         if batch is None:
             fail_streak += 1
-            if fail_streak >= 2 and BATCH > 1:
-                BATCH -= 1  # 連續失敗 → 縮細批次再試
+            if fail_streak >= 2 and BATCH > 3:
+                BATCH = max(3, BATCH - 2)   # 連續失敗 → 縮細批次再試
                 _t.sleep(1)
                 continue
             if fail_streak >= 4:
                 break
             _t.sleep(1)
             continue
-        # 過濾重複答案詞：同一詞語出現超過上限嘅題目唔收，等下一批出其他詞
+        # 過濾重複答案詞：同一詞語出現超過上限嘅題目唔收
         fresh = [it for it in batch if used_counts.get(it["answer"], 0) < max_repeat]
         if not fresh:
-            # 呢批全部撞晒已滿額詞語 → 唔計失敗，直接叫下一批（AI 會換詞）
             continue
         for it in fresh:
             used_counts[it["answer"]] = used_counts.get(it["answer"], 0) + 1
